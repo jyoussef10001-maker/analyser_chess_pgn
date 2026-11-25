@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analyseur d'échecs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Public+Sans:wght@400;500;600&display=swap">
+<style>
+/* Charte : voir DESIGN.md. Les couleurs sont des variables ; le mode sombre redéfinit les mêmes noms. */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --ink: #14202b;
+  --ink-2: #4b5b6b;
+  --line: #d5dce3;
+  --primary: #0b5c7a;
+  --primary-ink: #ffffff;
+  --primary-soft: #e1eef3;
+  --sq-light: #dce4ec;
+  --sq-dark: #7c93ab;
+  --last-move: rgba(236, 196, 48, 0.55);
+  --piece-white: #ffffff;
+  --piece-black: #16212c;
+  --coord-on-light: #4a6178;
+  --coord-on-dark: #f1f5f9;
+  --bar-white: #f4f7fa;
+  --bar-black: #2b3b4b;
+  --best: #17724a;
+  --good: #4e6b80;
+  --inaccuracy: #8a6400;
+  --mistake: #b4500f;
+  --blunder: #c62f3a;
+  --alert-bg: #fdeceb;
+  --alert-ink: #8c1d26;
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1720; --surface: #17212c; --ink: #e6ecf2; --ink-2: #9aa9b8; --line: #263544;
+    --primary: #5bb4d6; --primary-ink: #0b1620; --primary-soft: #1d3342;
+    --sq-light: #aebccb; --sq-dark: #55708d; --coord-on-light: #3f566e;
+    --bar-white: #eef2f6; --bar-black: #0a1118;
+    --best: #3cc083; --good: #8aa6ba; --inaccuracy: #e0b341; --mistake: #f08a3c; --blunder: #f0636c;
+    --alert-bg: #3a1a1e; --alert-ink: #ffb4b9;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--font-body); font-variant-numeric: tabular-nums; }
+h1, h2 { font-family: var(--font-display); margin: 0; text-wrap: balance; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 16px; padding-bottom: 48px; }
+
+header.top { padding: 24px 0 16px; }
+header.top h1 { font-size: 1.9rem; line-height: 1.15; }
+header.top p { margin: 6px 0 0; color: var(--ink-2); max-width: 60ch; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+label, .label { font-weight: 600; font-size: 0.9rem; }
+textarea { width: 100%; margin-top: 6px; padding: 10px; font: 0.9rem/1.5 ui-monospace, Menlo, Consolas, monospace; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; resize: vertical; }
+select, input[type=file] { font: inherit; color: var(--ink); }
+select { padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; max-width: 100%; min-width: 0; }
+#picker-row label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 100%; }
+.row { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; margin-top: 12px; }
+.row .grow { flex: 1 1 auto; }
+
+button { font: inherit; font-weight: 600; cursor: pointer; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 14px; min-height: 40px; }
+button:hover:not(:disabled) { background: var(--primary-soft); }
+button:disabled { opacity: 0.55; cursor: default; }
+button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
+button.primary:hover:not(:disabled) { background: var(--primary); filter: brightness(1.1); }
+button.quiet { border-color: transparent; background: transparent; color: var(--primary); padding-inline: 6px; }
+
+#alert { background: var(--alert-bg); color: var(--alert-ink); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-weight: 500; }
+#status { margin: 10px 0 0; color: var(--ink-2); min-height: 1.5em; }
+
+.game-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 4px; }
+.game-head h2 { font-size: 1.3rem; }
+.game-head span { color: var(--ink-2); }
+.warning { color: var(--inaccuracy); font-weight: 500; margin: 4px 0 0; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 24px; margin-top: 16px; align-items: start; }
+@media (max-width: 880px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+.board-row { display: flex; gap: 10px; align-items: stretch; }
+.evalbar { position: relative; width: 28px; flex: none; border-radius: 6px; overflow: hidden; background: var(--bar-black); border: 1px solid var(--line); }
+.evalbar .white { position: absolute; left: 0; right: 0; bottom: 0; background: var(--bar-white); transition: height 0.35s ease; }
+.evalbar b { position: absolute; left: 0; right: 0; font-size: 0.7rem; text-align: center; padding: 2px 0; }
+.evalbar b.top { top: 0; color: var(--bar-white); }
+.evalbar b.bottom { bottom: 0; color: var(--bar-black); }
+.board { flex: 1 1 auto; min-width: 0; }
+.board svg { display: block; width: 100%; height: auto; border-radius: 6px; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.detail { margin-top: 12px; min-height: 3.2em; }
+.detail strong { font-family: var(--font-display); font-size: 1.1rem; }
+.detail p { margin: 2px 0 0; color: var(--ink-2); }
+
+.tag { font-weight: 600; }
+.tag.best { color: var(--best); } .tag.good { color: var(--good); } .tag.inaccuracy { color: var(--inaccuracy); }
+.tag.mistake { color: var(--mistake); } .tag.blunder { color: var(--blunder); }
+
+table.summary { border-collapse: collapse; width: 100%; margin-bottom: 12px; }
+.summary th, .summary td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); font-weight: 400; }
+.summary thead th { font-weight: 600; font-size: 0.85rem; color: var(--ink-2); }
+.summary td.n { text-align: center; }
+
+.chart { width: 100%; height: 110px; display: block; margin-bottom: 12px; cursor: pointer; background: var(--bg); border-radius: 6px; border: 1px solid var(--line); }
+
+.moves { max-height: 340px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; position: relative; }
+.pair { display: grid; grid-template-columns: 44px 1fr 1fr; border-bottom: 1px solid var(--line); }
+.pair:last-child { border-bottom: 0; }
+.pair .num { padding: 6px 8px; color: var(--ink-2); }
+.pair button { border: 0; border-radius: 0; background: transparent; text-align: left; padding: 6px 8px; min-height: 36px; font-weight: 500; }
+.pair button[aria-current=true] { background: var(--primary); color: var(--primary-ink); }
+.pair button .mark { margin-left: 4px; font-weight: 700; }
+.pair button.inaccuracy .mark { color: var(--inaccuracy); } .pair button.mistake .mark { color: var(--mistake); } .pair button.blunder .mark { color: var(--blunder); }
+.pair button[aria-current=true] .mark { color: inherit; }
+
+.hint { color: var(--ink-2); font-size: 0.9rem; margin: 8px 0 0; }
+
+@media (prefers-reduced-motion: reduce) { .evalbar .white { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Analyseur d'échecs</h1>
+    <p>Colle une partie au format PGN. Stockfish évalue chaque coup et signale les imprécisions, les erreurs et les gaffes.</p>
+  </header>
+
+  <div id="alert" role="alert" hidden></div>
+
+  <section class="card" aria-labelledby="pgn-label">
+    <label id="pgn-label" for="pgn">Partie au format PGN</label>
+    <textarea id="pgn" rows="7" spellcheck="false" placeholder="1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 ..."></textarea>
+    <div class="row">
+      <label class="grow">Fichier .pgn <input type="file" id="file" accept=".pgn,.txt"></label>
+      <label>Précision
+        <select id="depth">
+          <option value="10">Rapide</option>
+          <option value="12" selected>Normale</option>
+          <option value="16">Précise (plus lente)</option>
+        </select>
+      </label>
+      <button type="button" class="quiet" id="sample">Essayer avec un exemple</button>
+      <button type="button" class="primary" id="go">Analyser</button>
+    </div>
+    <p id="status" aria-live="polite"></p>
+  </section>
+
+  <section id="review" class="card" hidden aria-label="Résultat de l'analyse">
+    <div class="game-head">
+      <h2 id="title"></h2>
+      <span id="meta"></span>
+    </div>
+    <p id="warning" class="warning" hidden></p>
+    <div class="row" id="picker-row" hidden>
+      <label>Partie du fichier <select id="picker"></select></label>
+    </div>
+
+    <div class="layout">
+      <div>
+        <div class="board-row">
+          <div class="evalbar" id="evalbar" role="img" aria-label="Évaluation">
+            <div class="white" id="evalwhite"></div>
+            <b class="top" id="evaltop"></b>
+            <b class="bottom" id="evalbottom"></b>
+          </div>
+          <div class="board" id="board"></div>
+        </div>
+        <div class="controls" role="group" aria-label="Navigation dans la partie">
+          <button type="button" id="first" aria-label="Début de la partie">⏮</button>
+          <button type="button" id="prev" aria-label="Coup précédent">◀</button>
+          <button type="button" id="next" aria-label="Coup suivant">▶</button>
+          <button type="button" id="last" aria-label="Fin de la partie">⏭</button>
+          <button type="button" id="flip">Retourner</button>
+          <button type="button" id="nextbad">Erreur suivante</button>
+        </div>
+        <div class="detail" id="detail" aria-live="polite"></div>
+        <p class="hint">Raccourcis : flèches gauche/droite, Début/Fin, F pour retourner l'échiquier.</p>
+      </div>
+
+      <div>
+        <table class="summary" id="summary"></table>
+        <svg class="chart" id="chart" viewBox="0 0 600 110" preserveAspectRatio="none" role="img" aria-label="Courbe d'évaluation de la partie. Clique pour aller à un coup."></svg>
+        <div class="moves" id="moves"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+"use strict";
+
+// --- Réglages d'affichage ---------------------------------------------------------
+// Ce sont des noms et des couleurs : aucune analyse n'est faite ici, tout vient de Stockfish via le serveur.
+const LABEL_NAMES = { best: "Excellent coup", good: "Bon coup", inaccuracy: "Imprécision", mistake: "Erreur", blunder: "Gaffe" };
+const MARKS = { inaccuracy: "?!", mistake: "?", blunder: "??" };
+const BAD_LABELS = ["inaccuracy", "mistake", "blunder"];
+const BAR_RANGE_CP = 500;           // la barre est pleine à ±5 pions (affichage seulement)
+const GLYPHS = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+const SAMPLE_PGN = `[Event "Exemple : mat du berger"]
+[White "Joueur A"]
+[Black "Joueur B"]
+[Result "1-0"]
+
+1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0`;
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+const $ = (id) => document.getElementById(id);
+const state = { pgn: "", depth: 12, reports: new Map(), game: null, ply: 0, flipped: false };
+
+// --- Petits outils pour construire la page sans innerHTML (le texte du PGN n'est jamais interprété comme du HTML) ---
+function make(tag, props = {}, children = []) {
+  const node = document.createElement(tag);
+  Object.assign(node, props);
+  node.append(...children);
+  return node;
+}
+function svgNode(tag, attrs = {}, text) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+// --- Messages ---------------------------------------------------------------------
+function showAlert(message) { $("alert").textContent = message; $("alert").hidden = false; }
+function hideAlert() { $("alert").hidden = true; }
+function setBusy(busy, message = "") {
+  for (const id of ["go", "sample", "file", "depth", "picker"]) $(id).disabled = busy;
+  $("status").textContent = message;
+}
+
+// --- Appels au serveur --------------------------------------------------------------
+async function api(path, body) {
+  let response;
+  try {
+    response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  } catch {
+    throw new Error("Le serveur ne répond pas. Vérifie que « python app.py » est lancé dans le terminal.");
+  }
+  let data = null;
+  try { data = await response.json(); } catch { /* réponse sans JSON : on utilisera le message générique */ }
+  if (!response.ok) throw new Error((data && data.error && data.error.message) || `Erreur du serveur (${response.status}).`);
+  return data;
+}
+
+async function checkSetup() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+    if (!status.chess) showAlert("python-chess n'est pas installé. Dans le terminal : pip install python-chess, puis relance « python app.py ».");
+    else if (!status.stockfish) showAlert("Stockfish est introuvable. Définis STOCKFISH_PATH ou place l'exécutable dans le dossier du projet, puis relance « python app.py ».");
+  } catch { /* la page est ouverte sans serveur : l'erreur s'affichera au clic sur Analyser */ }
+}
+
+// --- Lancer une analyse -----------------------------------------------------------------
+async function start() {
+  const pgn = $("pgn").value.trim();
+  hideAlert();
+  if (!pgn) { showAlert("Colle d'abord une partie au format PGN, ou ouvre un fichier."); return; }
+  state.pgn = pgn;
+  state.depth = Number($("depth").value);
+  state.reports.clear();
+  setBusy(true, "Lecture du PGN…");
+  try {
+    const { games } = await api("/api/games", { pgn });
+    fillPicker(games);
+    await analyze(0);
+  } catch (error) {
+    showAlert(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function analyze(index) {
+  if (state.reports.has(index)) { show(state.reports.get(index)); return; }
+  setBusy(true, "Stockfish analyse la partie… cela peut prendre une minute.");
+  const { game } = await api("/api/analyze", { pgn: state.pgn, game: index, depth: state.depth });
+  state.reports.set(index, game);
+  show(game);
+}
+
+function fillPicker(games) {
+  const picker = $("picker");
+  picker.replaceChildren(...games.map((g) =>
+    make("option", { value: String(g.index), textContent: `${g.index + 1}. ${g.white} – ${g.black} (${g.result}, ${g.plies} demi-coups)` })));
+  $("picker-row").hidden = games.length < 2;
+}
+
+// --- Affichage d'une partie analysée --------------------------------------------------------
+function show(game) {
+  state.game = game;
+  state.ply = 0;
+  $("review").hidden = false;
+  $("title").textContent = `${game.white} – ${game.black}`;
+  $("meta").textContent = `Résultat ${game.result} · ${game.date}`;
+  $("warning").hidden = !game.warning;
+  $("warning").textContent = game.warning || "";
+  $("picker").value = String(game.index);
+  renderSummary();
+  renderMoveList();
+  renderChart();
+  render();
+}
+
+function labelCounts(parity) { // parity 1 = Blancs (demi-coups impairs), 0 = Noirs
+  const counts = { inaccuracy: 0, mistake: 0, blunder: 0 };
+  for (const move of state.game.moves) if (move.ply % 2 === parity && move.label in counts) counts[move.label]++;
+  return counts;
+}
+
+function renderSummary() {
+  const head = make("thead", {}, [make("tr", {}, [make("th"), ...BAD_LABELS.map((l) => make("th", { textContent: LABEL_NAMES[l] + "s" }))])]);
+  const rows = [["Blancs", 1, state.game.white], ["Noirs", 0, state.game.black]].map(([side, parity, name]) => {
+    const counts = labelCounts(parity);
+    return make("tr", {}, [make("th", { scope: "row", textContent: `${side} (${name})` }),
+      ...BAD_LABELS.map((l) => make("td", { className: "n", textContent: String(counts[l]) }))]);
+  });
+  $("summary").replaceChildren(head, make("tbody", {}, rows));
+}
+
+function renderMoveList() {
+  const moves = state.game.moves;
+  const rows = [];
+  for (let i = 0; i < moves.length; i += 2) {
+    const cells = [make("span", { className: "num", textContent: `${i / 2 + 1}.` })];
+    for (const move of moves.slice(i, i + 2)) cells.push(moveButton(move));
+    rows.push(make("div", { className: "pair" }, cells));
+  }
+  $("moves").replaceChildren(...rows);
+}
+
+function moveButton(move) {
+  const button = make("button", { type: "button", className: move.label, title: LABEL_NAMES[move.label] }, [move.san]);
+  if (MARKS[move.label]) button.append(make("span", { className: "mark", textContent: MARKS[move.label] }));
+  button.dataset.ply = String(move.ply);
+  button.addEventListener("click", () => go(move.ply));
+  return button;
+}
+
+function go(ply) {
+  state.ply = Math.max(0, Math.min(state.game.moves.length, ply));
+  render();
+}
+
+function render() {
+  renderBoard();
+  renderEvalBar();
+  renderDetail();
+  renderChartMarker();
+  for (const button of $("moves").querySelectorAll("button")) {
+    const active = Number(button.dataset.ply) === state.ply;
+    button.setAttribute("aria-current", String(active));
+    if (active) { // on fait défiler seulement la liste, pas toute la page
+      const box = $("moves");
+      const top = button.offsetTop - box.offsetTop;
+      if (top < box.scrollTop || top + button.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = top - box.clientHeight / 2;
+    }
+  }
+  $("first").disabled = $("prev").disabled = state.ply === 0;
+  $("next").disabled = $("last").disabled = state.ply === state.game.moves.length;
+}
+
+function currentMove() { return state.ply > 0 ? state.game.moves[state.ply - 1] : null; }
+
+// --- Échiquier (dessiné en SVG à partir de la FEN envoyée par le serveur) -------------------------
+function renderBoard() {
+  const move = currentMove();
+  const fen = move ? move.fen : state.game.start_fen;
+  const svg = svgNode("svg", { viewBox: "0 0 800 800", role: "img", "aria-label": "Échiquier" });
+  const place = (file, rank) => ({ x: (state.flipped ? 7 - file : file) * 100, y: (state.flipped ? rank : 7 - rank) * 100 });
+
+  for (let rank = 0; rank < 8; rank++) {
+    for (let file = 0; file < 8; file++) {
+      const { x, y } = place(file, rank);
+      const light = (file + rank) % 2 === 1;
+      svg.append(svgNode("rect", { x, y, width: 100, height: 100, fill: light ? "var(--sq-light)" : "var(--sq-dark)" }));
+    }
+  }
+  if (move) {
+    for (const square of [move.uci.slice(0, 2), move.uci.slice(2, 4)]) {
+      const { x, y } = place(square.charCodeAt(0) - 97, Number(square[1]) - 1);
+      svg.append(svgNode("rect", { x, y, width: 100, height: 100, fill: "var(--last-move)" }));
+    }
+  }
+  // Coordonnées : numéro de rangée sur la colonne de gauche, lettre de colonne sur la rangée du bas.
+  for (let i = 0; i < 8; i++) {
+    const leftFile = state.flipped ? 7 : 0, bottomRank = state.flipped ? 7 : 0;
+    const rankPos = place(leftFile, i), filePos = place(i, bottomRank);
+    const lightRank = (leftFile + i) % 2 === 1, lightFile = (i + bottomRank) % 2 === 1;
+    svg.append(svgNode("text", { x: rankPos.x + 6, y: rankPos.y + 24, "font-size": 22, "font-weight": 600,
+      fill: lightRank ? "var(--coord-on-light)" : "var(--coord-on-dark)" }, String(i + 1)));
+    svg.append(svgNode("text", { x: filePos.x + 94, y: filePos.y + 94, "font-size": 22, "font-weight": 600, "text-anchor": "end",
+      fill: lightFile ? "var(--coord-on-light)" : "var(--coord-on-dark)" }, String.fromCharCode(97 + i)));
+  }
+  fen.split(" ")[0].split("/").forEach((row, rowIndex) => {
+    let file = 0;
+    for (const char of row) {
+      if (/\d/.test(char)) { file += Number(char); continue; }
+      const { x, y } = place(file, 7 - rowIndex);
+      const isWhite = char === char.toUpperCase();
+      svg.append(svgNode("text", {
+        x: x + 50, y: y + 50, dy: "0.35em", "text-anchor": "middle", "font-size": 82,
+        fill: isWhite ? "var(--piece-white)" : "var(--piece-black)",
+        stroke: isWhite ? "var(--piece-black)" : "var(--piece-white)", "stroke-width": 2.5, "paint-order": "stroke",
+      }, GLYPHS[char.toLowerCase()] + "︎"));
+      file++;
+    }
+  });
+  $("board").replaceChildren(svg);
+}
+
+// --- Barre d'évaluation et texte du coup ------------------------------------------------------
+function evalText(move) {
+  if (move.mate !== null) return "M" + Math.abs(move.mate);
+  return (move.eval >= 0 ? "+" : "−") + (Math.abs(move.eval) / 100).toFixed(1);
+}
+
+function renderEvalBar() {
+  const move = currentMove();
+  const percent = move ? 50 + (Math.max(-BAR_RANGE_CP, Math.min(BAR_RANGE_CP, move.eval)) / BAR_RANGE_CP) * 50 : 50;
+  $("evalwhite").style.height = percent + "%";
+  const text = move ? evalText(move) : "";
+  const whiteAhead = move && move.eval >= 0;
+  $("evaltop").textContent = move && !whiteAhead ? text : "";
+  $("evalbottom").textContent = move && whiteAhead ? text : "";
+  $("evalbar").setAttribute("aria-label", move ? `Évaluation ${text}` : "Évaluation : position de départ");
+}
+
+function renderDetail() {
+  const move = currentMove();
+  const box = $("detail");
+  if (!move) { box.replaceChildren(make("p", { textContent: "Position de départ. Avance avec ▶ ou clique sur un coup." })); return; }
+  const number = Math.ceil(move.ply / 2) + (move.ply % 2 === 1 ? "." : "…");
+  const lines = [make("strong", {}, [`${number} ${move.san} `, make("span", { className: "tag " + move.label, textContent: "— " + LABEL_NAMES[move.label] })])];
+  const notes = [`Évaluation : ${evalText(move)} (Blancs).`];
+  if (move.loss > 0) notes.push(`Ce coup perd ${(move.loss / 100).toFixed(1)} pion.`);
+  if (move.best_san && move.best_san !== move.san) notes.push(`Stockfish préférait ${move.best_san}.`);
+  box.replaceChildren(...lines, make("p", { textContent: notes.join(" ") }));
+}
+
+// --- Courbe d'évaluation -----------------------------------------------------------------------
+function chartX(ply, count) { return count === 1 ? 300 : 10 + ((ply - 1) / (count - 1)) * 580; }
+function chartY(cp) { return 55 - (Math.max(-BAR_RANGE_CP, Math.min(BAR_RANGE_CP, cp)) / BAR_RANGE_CP) * 50; }
+
+function renderChart() {
+  const moves = state.game.moves;
+  const svg = $("chart");
+  svg.replaceChildren(svgNode("line", { x1: 0, x2: 600, y1: 55, y2: 55, stroke: "var(--line)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+  if (moves.length > 1) {
+    const points = moves.map((m) => `${chartX(m.ply, moves.length)},${chartY(m.eval)}`).join(" ");
+    svg.append(svgNode("polyline", { points, fill: "none", stroke: "var(--primary)", "stroke-width": 2, "vector-effect": "non-scaling-stroke" }));
+  }
+  svg.append(svgNode("line", { id: "chart-marker", y1: 0, y2: 110, stroke: "var(--ink)", "stroke-width": 1.5, "vector-effect": "non-scaling-stroke", visibility: "hidden" }));
+}
+
+function renderChartMarker() {
+  const marker = $("chart-marker");
+  if (!marker) return;
+  const count = state.game.moves.length;
+  marker.setAttribute("visibility", state.ply === 0 ? "hidden" : "visible");
+  if (state.ply > 0) { const x = chartX(state.ply, count); marker.setAttribute("x1", x); marker.setAttribute("x2", x); }
+}
+
+// --- Commandes ---------------------------------------------------------------------------------------
+function nextMistake() {
+  const moves = state.game.moves;
+  const found = moves.find((m) => m.ply > state.ply && BAD_LABELS.includes(m.label)) || moves.find((m) => BAD_LABELS.includes(m.label));
+  if (found) go(found.ply); else $("detail").replaceChildren(make("p", { textContent: "Aucune imprécision, erreur ni gaffe dans cette partie." }));
+}
+
+$("go").addEventListener("click", start);
+$("sample").addEventListener("click", () => { $("pgn").value = SAMPLE_PGN; });
+$("picker").addEventListener("change", async () => {
+  setBusy(true);
+  try { await analyze(Number($("picker").value)); } catch (error) { showAlert(error.message); } finally { setBusy(false); }
+});
+$("file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  hideAlert();
+  if (file.size > 2_000_000) { showAlert("Ce fichier dépasse 2 Mo : découpe-le en plusieurs fichiers PGN."); return; }
+  $("pgn").value = await file.text();
+});
+$("first").addEventListener("click", () => go(0));
+$("prev").addEventListener("click", () => go(state.ply - 1));
+$("next").addEventListener("click", () => go(state.ply + 1));
+$("last").addEventListener("click", () => go(state.game.moves.length));
+$("flip").addEventListener("click", () => { state.flipped = !state.flipped; renderBoard(); });
+$("nextbad").addEventListener("click", nextMistake);
+$("chart").addEventListener("click", (event) => {
+  const box = $("chart").getBoundingClientRect();
+  const count = state.game.moves.length;
+  const x = ((event.clientX - box.left) / box.width) * 600;
+  go(count === 1 ? 1 : Math.round(((x - 10) / 580) * (count - 1)) + 1);
+});
+document.addEventListener("keydown", (event) => {
+  if (!state.game || $("review").hidden || /^(TEXTAREA|SELECT|INPUT)$/.test(event.target.tagName)) return;
+  const keys = { ArrowLeft: () => go(state.ply - 1), ArrowRight: () => go(state.ply + 1), Home: () => go(0),
+    End: () => go(state.game.moves.length), f: () => { state.flipped = !state.flipped; renderBoard(); } };
+  const action = keys[event.key];
+  if (action) { event.preventDefault(); action(); }
+});
+
+checkSetup();
+</script>
+</body>
+</html>
