@@ -134,6 +134,8 @@ class FakeEngine:
     """Faux Stockfish : renvoie à chaque appel l'évaluation suivante de la liste.
 
     Chaque élément est (score, meilleur coup en UCI). Le score est vu du côté des Blancs.
+    Meilleur coup à None : le faux moteur prend un coup légal quelconque de la position
+    (python-chess refuse de noter en SAN un coup illégal).
     """
 
     def __init__(self, script):
@@ -141,7 +143,8 @@ class FakeEngine:
 
     def analyse(self, board, limit):
         score, best_move = self.script.pop(0)
-        return {"score": chess.engine.PovScore(score, chess.WHITE), "pv": [chess.Move.from_uci(best_move)]}
+        move = chess.Move.from_uci(best_move) if best_move else next(iter(board.legal_moves))
+        return {"score": chess.engine.PovScore(score, chess.WHITE), "pv": [move]}
 
 
 def first_game(pgn_text):
@@ -165,7 +168,7 @@ def test_read_games_refuses_too_many_games(monkeypatch):
 
 @needs_chess
 def test_illegal_move_cuts_the_game_and_warns():
-    report = app.analyze_game(first_game("1. e4 e5 2. Ke5 *"), FakeEngine([(chess.engine.Cp(0), "e2e4")] * 3), depth=5)
+    report = app.analyze_game(first_game("1. e4 e5 2. Ke5 *"), FakeEngine([(chess.engine.Cp(0), None)] * 3), depth=5)
     assert [m["san"] for m in report["moves"]] == ["e4", "e5"]
     assert report["warning"]
 
@@ -240,7 +243,7 @@ class FakeEngineContext:
 
 @pytest.fixture
 def fake_stockfish(monkeypatch):
-    evals = [(chess.engine.Cp(30), "e2e4")] * 20
+    evals = [(chess.engine.Cp(30), None)] * 20
     monkeypatch.setattr(app, "find_stockfish", lambda: "/faux/stockfish")
     monkeypatch.setattr(app, "open_stockfish", lambda path: FakeEngineContext(FakeEngine(evals)))
 
