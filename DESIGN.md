@@ -5,7 +5,8 @@
 1. **Contexte.** Programme local pour une personne. Une requête HTTP lance une analyse longue (secondes à minutes)
    à une charge très faible (une analyse à la fois). Serveur simple, un seul processus, un seul fil.
 2. **Données.** Une partie = en-têtes + liste de coups. Un coup = SAN, UCI, FEN, évaluation, mat éventuel,
-   perte, verdict, meilleur coup. Rien n'est stocké : tout est recalculé. Règles qui ne doivent jamais être fausses :
+   perte, verdict, meilleur coup (SAN et UCI) et début de la ligne principale de Stockfish. En-têtes facultatifs
+   (Elo, ouverture, ECO, événement) : `null` s'ils manquent, la page n'invente rien. Rien n'est stocké : tout est recalculé. Règles qui ne doivent jamais être fausses :
    l'évaluation est toujours du point de vue des Blancs et plafonnée à ±1000 ; la perte est toujours ≥ 0
    et se calcule du point de vue du joueur qui vient de jouer.
 3. **Pannes.** Mauvaise demande (PGN vide, trop gros, mauvaise profondeur) : 4xx, rien dans le journal.
@@ -36,7 +37,16 @@ Même charte que la version précédente (bleu-vert sobre, mode clair et sombre 
 
 - Couleurs : fond `#eef1f4`, surface `#ffffff`, texte `#14202b`, action `#0b5c7a`.
   Verdicts : excellent `#17724a`, bon `#4e6b80`, imprécision `#8a6400`, erreur `#b4500f`, gaffe `#c62f3a`.
+  Mode sombre (soigné en priorité) : fond `#0c131a`, surface `#141e28`, texte `#e6ecf2`, action `#5bb4d6`.
+  Échec : halo rouge sur le roi. Flèche du coup de Stockfish : couleur « excellent » semi-transparente.
 - Polices : Bricolage Grotesque (titres), Public Sans (texte), avec polices système en secours.
 - Les verdicts ne reposent jamais sur la couleur seule : texte (« Gaffe ») et signes (`?!`, `?`, `??`).
-- Clavier : flèches, Début/Fin, `F`. Focus visible. Mouvement réduit respecté.
-- Écran étroit : une seule colonne, aucun défilement horizontal.
+- Disposition : barre du haut (état de Stockfish, « Nouvelle analyse ») ; à gauche l'échiquier avec la barre
+  d'évaluation, les joueurs, les pièces prises et la navigation, puis la courbe ; à droite la partie (joueurs, Elo,
+  résultat, ouverture, profondeur), l'analyse du coup affiché et la liste des coups.
+- Analyse du coup : trois blocs séparés (coup joué, choix de Stockfish, évaluation après le coup) et une phrase
+  construite uniquement avec les chiffres du serveur.
+- Les pièces prises et l'avance de matériel sont comptées sur la FEN (valeurs usuelles 1/3/3/5/9) : affichage seulement.
+- Clavier : flèches, Début/Fin, `F`, `N`/`P` (erreur suivante/précédente). Les raccourcis ignorent Ctrl/Alt/Cmd.
+  Focus visible. Mouvement réduit respecté.
+- Écran étroit : une seule colonne (partie, échiquier, analyse, coups, courbe), aucun défilement horizontal.

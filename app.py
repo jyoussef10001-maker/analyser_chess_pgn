@@ -43,6 +43,7 @@ DEFAULT_DEPTH = 12          # profondeur Stockfish par défaut (12 = rapide, 18 
 MAX_DEPTH = 20
 SECONDS_PER_POSITION = 5    # Stockfish s'arrête au bout de ce temps, même si la profondeur n'est pas atteinte
 MATE_SCORE = 10_000         # valeur donnée à un mat avant d'être plafonnée
+PV_PLIES = 6                # demi-coups gardés de la ligne principale de Stockfish (affichage seulement)
 CLAMP_CP = 1000             # les évaluations sont plafonnées à ±10 pions
 
 # Seuils sur la perte en centipions (100 = 1 pion) : (perte maximale, nom du verdict).
@@ -112,6 +113,12 @@ def count_plies(game):
     return sum(1 for _ in game.mainline_moves())
 
 
+def header_or_none(game, name):
+    """Valeur d'un en-tête PGN, ou None s'il est absent ou inconnu (« ? ») : la page n'invente rien."""
+    value = game.headers.get(name, "").strip()
+    return value if value and value != "?" else None
+
+
 def game_summary(index, game):
     return {
         "index": index,
@@ -120,6 +127,11 @@ def game_summary(index, game):
         "result": game.headers.get("Result", "*"),
         "date": game.headers.get("Date", "?"),
         "plies": count_plies(game),
+        "white_elo": header_or_none(game, "WhiteElo"),
+        "black_elo": header_or_none(game, "BlackElo"),
+        "event": header_or_none(game, "Event"),
+        "eco": header_or_none(game, "ECO"),
+        "opening": header_or_none(game, "Opening"),
     }
 
 
@@ -140,13 +152,25 @@ def label_for(loss):
 def evaluate(board, engine, depth):
     """Demande à Stockfish l'évaluation d'une position.
 
-    Retourne (évaluation en centipions du point de vue des Blancs, mat en N coups ou None, meilleur coup).
+    Retourne (évaluation en centipions du point de vue des Blancs, mat en N coups ou None,
+    ligne principale de Stockfish : liste de coups, le premier est le meilleur coup).
     """
     info = engine.analyse(board, chess.engine.Limit(depth=depth, time=SECONDS_PER_POSITION))
     white_score = info["score"].white()
     centipawns = clamp(white_score.score(mate_score=MATE_SCORE))
-    pv = info.get("pv")
-    return centipawns, white_score.mate(), (pv[0] if pv else None)
+    return centipawns, white_score.mate(), list(info.get("pv") or [])
+
+
+def line_san(board, line):
+    """Les premiers coups d'une ligne de Stockfish, en notation SAN (s'arrête au premier coup illisible)."""
+    board = board.copy(stack=False)
+    sans = []
+    for move in line[:PV_PLIES]:
+        if not board.is_legal(move):
+            break
+        sans.append(board.san(move))
+        board.push(move)
+    return sans
 
 
 def finished_game_eval(board):
@@ -160,19 +184,22 @@ def finished_game_eval(board):
 def analyze_game(game, engine, depth):
     """Évalue la position avant la partie puis après chaque coup, et en déduit le verdict de chaque coup."""
     board = game.board()
-    before_cp, _, best_move = evaluate(board, engine, depth)  # position de départ
+    before_cp, _, best_line = evaluate(board, engine, depth)  # position de départ
+    start_cp = before_cp
     moves = []
 
     for ply, move in enumerate(game.mainline_moves(), start=1):
         mover_is_white = board.turn == chess.WHITE
-        best_san = board.san(best_move) if best_move else None  # le meilleur coup se note AVANT de jouer
+        pv_san = line_san(board, best_line)  # le meilleur coup se note AVANT de jouer
+        best_san = pv_san[0] if pv_san else None
+        best_uci = best_line[0].uci() if best_san else None
         san = board.san(move)
         board.push(move)
 
         if board.is_game_over():
-            after_cp, mate, best_move = finished_game_eval(board), None, None
+            after_cp, mate, best_line = finished_game_eval(board), None, []
         else:
-            after_cp, mate, best_move = evaluate(board, engine, depth)
+            after_cp, mate, best_line = evaluate(board, engine, depth)
 
         # Perte du joueur qui vient de jouer : ce que sa position a perdu, de son point de vue.
         loss = max(0, (before_cp - after_cp) if mover_is_white else (after_cp - before_cp))
@@ -186,12 +213,15 @@ def analyze_game(game, engine, depth):
             "loss": loss,
             "label": label_for(loss),
             "best_san": best_san,      # le meilleur coup de Stockfish dans la position d'avant
+            "best_uci": best_uci,      # le même coup en UCI : sert à dessiner la flèche
+            "pv_san": pv_san,          # la ligne principale de Stockfish depuis la position d'avant (SAN)
         })
         before_cp = after_cp
 
     result = game_summary(0, game)
     result.update({
         "start_fen": game.board().fen(),
+        "start_eval": start_cp,        # évaluation de la position de départ (centipions, point de vue des Blancs)
         "moves": moves,
         "warning": "Le PGN contient un coup illisible ou illégal : la partie est coupée à cet endroit."
         if game.errors else None,

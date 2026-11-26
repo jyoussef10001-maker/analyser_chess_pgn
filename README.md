@@ -29,8 +29,9 @@ Le navigateur s'ouvre sur http://localhost:8000. Le terminal indique si python-c
 1. Colle le PGN (ou ouvre un fichier `.pgn`, ou clique « Essayer avec un exemple »).
 2. Choisis la précision : Rapide (profondeur 10), Normale (12), Précise (16, plus lente).
 3. Clique **Analyser**. Une partie prend de quelques secondes à une minute.
-4. Navigue avec les flèches du clavier, `F` retourne l'échiquier, « Erreur suivante » va aux coups à revoir,
-   un clic sur la courbe saute au coup. Si le PGN contient plusieurs parties, un menu permet de choisir.
+4. Navigue avec les flèches du clavier, `F` retourne l'échiquier, « Erreur suivante » / « Erreur précédente »
+   (ou `N` / `P`) vont aux coups à revoir, un clic sur la courbe saute au coup. La flèche verte montre le coup
+   que Stockfish préférait. Si le PGN contient plusieurs parties, un menu permet de choisir.
 
 ## Tests
 
