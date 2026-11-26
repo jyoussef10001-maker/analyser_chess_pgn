@@ -134,6 +134,8 @@ class FakeEngine:
     """Faux Stockfish : renvoie à chaque appel l'évaluation suivante de la liste.
 
     Chaque élément est (score, meilleur coup en UCI). Le score est vu du côté des Blancs.
+    Meilleur coup à None : le faux moteur prend un coup légal quelconque de la position
+    (python-chess refuse de noter en SAN un coup illégal).
     """
 
     def __init__(self, script):
@@ -141,7 +143,8 @@ class FakeEngine:
 
     def analyse(self, board, limit):
         score, best_move = self.script.pop(0)
-        return {"score": chess.engine.PovScore(score, chess.WHITE), "pv": [chess.Move.from_uci(best_move)]}
+        move = chess.Move.from_uci(best_move) if best_move else next(iter(board.legal_moves))
+        return {"score": chess.engine.PovScore(score, chess.WHITE), "pv": [move]}
 
 
 def first_game(pgn_text):
@@ -165,7 +168,7 @@ def test_read_games_refuses_too_many_games(monkeypatch):
 
 @needs_chess
 def test_illegal_move_cuts_the_game_and_warns():
-    report = app.analyze_game(first_game("1. e4 e5 2. Ke5 *"), FakeEngine([(chess.engine.Cp(0), "e2e4")] * 3), depth=5)
+    report = app.analyze_game(first_game("1. e4 e5 2. Ke5 *"), FakeEngine([(chess.engine.Cp(0), None)] * 3), depth=5)
     assert [m["san"] for m in report["moves"]] == ["e4", "e5"]
     assert report["warning"]
 
@@ -224,6 +227,51 @@ def test_checkmate_needs_no_engine_call():
     assert engine.script == []  # toutes les évaluations prévues ont été utilisées, aucune de plus
 
 
+@needs_chess
+def test_report_gives_best_move_line_and_start_eval():
+    # Le faux moteur peut renvoyer une ligne de plusieurs coups : la page reçoit le meilleur coup en SAN et en UCI,
+    # la ligne principale en SAN, et l'évaluation de la position de départ.
+    class LineEngine:
+        script = [(30, ["e2e4", "e7e5", "g1f3"]), (25, ["e7e5"]), (40, ["g1f3"])]
+
+        def analyse(self, board, limit):
+            score, line = self.script.pop(0)
+            return {"score": chess.engine.PovScore(chess.engine.Cp(score), chess.WHITE),
+                    "pv": [chess.Move.from_uci(m) for m in line]}
+
+    report = app.analyze_game(first_game("1. d4 e5 *"), LineEngine(), depth=10)
+    first, second = report["moves"]
+    assert report["start_eval"] == 30
+    assert (first["best_san"], first["best_uci"], first["pv_san"]) == ("e4", "e2e4", ["e4", "e5", "Nf3"])
+    assert (second["best_san"], second["best_uci"], second["pv_san"]) == ("e5", "e7e5", ["e5"])
+
+
+@needs_chess
+def test_line_stops_at_an_illegal_move_and_is_cut_to_pv_plies(monkeypatch):
+    monkeypatch.setattr(app, "PV_PLIES", 2)
+    board = chess.Board()
+    line = [chess.Move.from_uci(m) for m in ["e2e4", "e7e5", "g1f3"]]
+    assert app.line_san(board, line) == ["e4", "e5"]
+    assert app.line_san(board, [chess.Move.from_uci("e2e5")]) == []
+
+
+@needs_chess
+def test_best_line_keeps_check_and_mate_signs():
+    engine = FakeEngine([(chess.engine.Cp(0), None)] * 3 + [(chess.engine.Mate(-1), "d8h4")])
+    last = app.analyze_game(first_game("1. f3 e5 2. g4 Qh4#"), engine, depth=10)["moves"][-1]
+    assert (last["best_san"], last["best_uci"], last["pv_san"]) == ("Qh4#", "d8h4", ["Qh4#"])
+
+
+@needs_chess
+def test_summary_gives_optional_headers_or_none():
+    pgn = ('[Event "Open"]\n[White "A"]\n[Black "B"]\n[WhiteElo "2100"]\n[BlackElo "?"]\n'
+           '[ECO "C50"]\n[Opening "Italian Game"]\n\n1. e4 e5 *\n\n1. d4 *')
+    first, second = app.games_request({"pgn": pgn})["games"]
+    assert (first["white_elo"], first["black_elo"], first["eco"], first["opening"], first["event"]) == \
+        ("2100", None, "C50", "Italian Game", "Open")
+    assert (second["white_elo"], second["eco"], second["opening"], second["event"]) == (None, None, None, None)
+
+
 # --- Requêtes complètes avec un faux Stockfish ---------------------------------------------
 
 
@@ -240,7 +288,7 @@ class FakeEngineContext:
 
 @pytest.fixture
 def fake_stockfish(monkeypatch):
-    evals = [(chess.engine.Cp(30), "e2e4")] * 20
+    evals = [(chess.engine.Cp(30), None)] * 20
     monkeypatch.setattr(app, "find_stockfish", lambda: "/faux/stockfish")
     monkeypatch.setattr(app, "open_stockfish", lambda path: FakeEngineContext(FakeEngine(evals)))
 
@@ -321,6 +369,6 @@ def test_real_stockfish_finds_the_scholars_mate():
     # Les Blancs peuvent mater en un coup avec Dxf7.
     board = chess.Board("r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4")
     with app.open_stockfish(app.find_stockfish()) as engine:
-        cp, mate, best = app.evaluate(board, engine, depth=8)
+        cp, mate, line = app.evaluate(board, engine, depth=8)
     assert mate == 1
-    assert best.uci() == "h5f7"
+    assert line[0].uci() == "h5f7"
